@@ -21,6 +21,9 @@ repositories {
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	implementation 'org.openpnp:opencv:4.5.1-2'
+	implementation 'com.fasterxml.jackson.core:jackson-databind'
+	implementation 'com.github.sarxos:webcam-capture:0.3.12'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
