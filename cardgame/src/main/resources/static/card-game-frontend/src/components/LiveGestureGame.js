@@ -18,13 +18,14 @@ const LiveGestureGame = () => {
   const [debugInfo, setDebugInfo] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   
-  // Simple cooldown state
+  // Enhanced gesture detection states
   const [lastGestureTime, setLastGestureTime] = useState(0);
   
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
   const gameIdRef = useRef(null);
   const detectionRef = useRef(false);
+  const gestureHistoryRef = useRef([]);
 
   // Load HandPose model
   useEffect(() => {
@@ -149,9 +150,32 @@ const LiveGestureGame = () => {
   const restartGame = () => {
     setGameState(null);
     setGesture('none');
+    gestureHistoryRef.current = [];
     gameIdRef.current = null;
     setMessage('Start a new game to begin!');
     startNewGame();
+  };
+
+  // Fixed gesture stabilization
+  const getStableGesture = (currentGesture) => {
+    // Add current gesture to history (keep last 5 frames)
+    const newHistory = [...gestureHistoryRef.current, currentGesture].slice(-5);
+    gestureHistoryRef.current = newHistory;
+    
+    // Require at least 3 out of 5 frames to have the same gesture
+    const gestureCounts = {};
+    newHistory.forEach(g => {
+      gestureCounts[g] = (gestureCounts[g] || 0) + 1;
+    });
+    
+    // Find the most frequent gesture that appears at least 3 times
+    for (const [gest, count] of Object.entries(gestureCounts)) {
+      if (count >= 3 && gest !== 'none') {
+        return gest;
+      }
+    }
+    
+    return 'none';
   };
 
   const startGestureDetection = () => {
@@ -171,6 +195,7 @@ const LiveGestureGame = () => {
     detectionRef.current = true;
     setIsDetecting(true);
     setLastGestureTime(0); // Reset cooldown
+    gestureHistoryRef.current = []; // Clear gesture history
     setMessage('Detection started! Show your hand to the camera.');
     webSocketService.startRecognition(0);
     detectGestures();
@@ -180,6 +205,7 @@ const LiveGestureGame = () => {
     detectionRef.current = false;
     setIsDetecting(false);
     setGesture('none');
+    gestureHistoryRef.current = [];
     setMessage('Gesture detection stopped.');
     setDebugInfo('');
     webSocketService.stopRecognition();
@@ -191,7 +217,8 @@ const LiveGestureGame = () => {
     try {
       const video = webcamRef.current.video;
       if (!video || video.readyState !== 4) {
-        requestAnimationFrame(detectGestures);
+        // Use setTimeout instead of requestAnimationFrame for frame rate control
+        setTimeout(detectGestures, 100); // 10fps instead of 60fps
         return;
       }
 
@@ -205,43 +232,57 @@ const LiveGestureGame = () => {
 
       if (predictions.length > 0) {
         const hand = predictions[0];
-        const detectedGesture = classifyGesture(hand);
+        const rawGesture = classifyGesture(hand);
         
-        setGesture(detectedGesture);
+        // Apply gesture stabilization
+        const stableGesture = getStableGesture(rawGesture);
+        
+        // Only update displayed gesture if it's stable
+        if (stableGesture !== gesture) {
+          setGesture(stableGesture);
+        }
+        
         drawHand(hand.landmarks, ctx);
         
-        // Simple cooldown - 800ms between gestures
+        // Enhanced cooldown system
         const now = Date.now();
         const timeSinceLastGesture = now - lastGestureTime;
         
-        // First gesture is instant, then 800ms cooldown
-        if (detectedGesture !== 'none' && gameIdRef.current && (lastGestureTime === 0 || timeSinceLastGesture > 800)) {
-          console.log(`🎯 Sending gesture: ${detectedGesture} for game: ${gameIdRef.current}`);
-          webSocketService.sendGesture(detectedGesture, gameIdRef.current);
+        // Only process gestures that are stable and not 'none'
+        if (stableGesture !== 'none' && gameIdRef.current && (lastGestureTime === 0 || timeSinceLastGesture > 800)) {
+          console.log(`🎯 Sending stable gesture: ${stableGesture} for game: ${gameIdRef.current}`);
+          webSocketService.sendGesture(stableGesture, gameIdRef.current);
           setLastGestureTime(now);
           
-          setDebugInfo(`✅ ${detectedGesture.toUpperCase()} gesture sent!`);
-        } else if (detectedGesture !== 'none') {
+          setDebugInfo(`✅ ${stableGesture.toUpperCase()} gesture sent! (Stable)`);
+        } else if (stableGesture !== 'none' && stableGesture !== gesture) {
+          // Show when gesture is stabilizing
+          setDebugInfo(`🔄 Stabilizing: ${rawGesture} → ${stableGesture}`);
+        } else if (stableGesture !== 'none') {
           // Show when gesture is detected but waiting for cooldown
           const remainingCooldown = Math.ceil((800 - timeSinceLastGesture) / 1000);
-          setDebugInfo(`⏳ ${detectedGesture.toUpperCase()} detected - ready in ${remainingCooldown}s`);
+          setDebugInfo(`⏳ ${stableGesture.toUpperCase()} ready in ${remainingCooldown}s`);
         } else {
-          setDebugInfo(`Hand detected! Fingers: ${countExtendedFingers(hand)} - Gesture: ${detectedGesture}`);
+          setDebugInfo(`Hand detected! Raw: ${rawGesture} | Stable: ${stableGesture}`);
         }
       } else {
+        // No hand detected - reset gesture history
+        gestureHistoryRef.current = [];
         setGesture('none');
         setDebugInfo('No hand detected - show your hand to the camera');
       }
 
+      // Continue detection with controlled frame rate (10fps)
       if (detectionRef.current) {
-        requestAnimationFrame(detectGestures);
+        setTimeout(detectGestures, 100); // 100ms = 10fps
       }
     } catch (error) {
       console.error('Error in gesture detection:', error);
       setDebugInfo('Detection error: ' + error.message);
       
+      // Continue with error recovery
       if (detectionRef.current) {
-        setTimeout(() => detectGestures(), 100);
+        setTimeout(detectGestures, 100);
       }
     }
   };
@@ -274,7 +315,10 @@ const LiveGestureGame = () => {
   const classifyGesture = (hand) => {
     const extendedFingers = countExtendedFingers(hand);
     
-    console.log(`Extended fingers: ${extendedFingers}`);
+    // Reduced logging to prevent console spam
+    if (Math.random() < 0.1) { // Only log 10% of the time
+      console.log(`Extended fingers: ${extendedFingers}`);
+    }
     
     if (extendedFingers >= 4) {
       return 'higher';
@@ -348,6 +392,9 @@ const LiveGestureGame = () => {
             <div className={`status-indicator ${model ? 'connected' : 'disconnected'}`}>
               AI Model: {model ? '✅ Loaded' : '❌ Loading...'}
             </div>
+            <div className="status-indicator connected">
+              Detection Rate: 10fps (Stable)
+            </div>
           </div>
 
           {/* Game Stats */}
@@ -413,6 +460,11 @@ const LiveGestureGame = () => {
                  gesture === 'reset' ? '✌️ RESET' :
                  '🤔 NO GESTURE'}
               </span>
+              {gestureHistoryRef.current.length > 0 && (
+                <span className="stability-indicator">
+                  Stability: {Math.min(gestureHistoryRef.current.length, 5)}/5
+                </span>
+              )}
             </div>
           </div>
 
@@ -472,21 +524,25 @@ const LiveGestureGame = () => {
               <div className="camera-container">
                 <Webcam
                   ref={webcamRef}
+                  audio={false}
+                  screenshotFormat="image/jpeg"
+                  onUserMediaError={handleCameraError}
+                  onUserMedia={handleCameraStart}
+                  videoConstraints={{
+                    width: { ideal: 640 },
+                    height: { ideal: 480 },
+                    facingMode: "user",
+                    aspectRatio: { ideal: 1.7777777778 }
+                  }}
                   style={{ 
                     width: '100%', 
                     height: '300px',
                     borderRadius: '10px',
                     border: '3px solid #3498db',
-                    transform: 'scaleX(-1)'
+                    transform: 'scaleX(-1)',
+                    display: cameraAvailable ? 'block' : 'none'
                   }}
-                  screenshotFormat="image/jpeg"
-                  onUserMediaError={handleCameraError}
-                  onUserMedia={handleCameraStart}
-                  videoConstraints={{
-                    width: 640,
-                    height: 480,
-                    facingMode: "user"
-                  }}
+                  forceScreenshotSourceSize={true}
                 />
                 <canvas
                   ref={canvasRef}
@@ -499,7 +555,7 @@ const LiveGestureGame = () => {
                 />
                 <div className="camera-overlay">
                   <div className={`detection-status ${isDetecting ? 'active' : 'inactive'}`}>
-                    {isDetecting ? '🔴 Live' : '⚪ Ready'}
+                    {isDetecting ? '🔴 Live (10fps)' : '⚪ Ready'}
                   </div>
                 </div>
               </div>
@@ -528,7 +584,7 @@ const LiveGestureGame = () => {
               </div>
               <div className="instruction-item">
                 <span className="gesture-demo">⏱️</span>
-                <span>0.8 second cooldown between gestures</span>
+                <span>0.8s cooldown + stabilization</span>
               </div>
             </div>
           </div>
