@@ -1,0 +1,76 @@
+.card {
+  width: 120px;
+  height: 180px;
+  border: 2px solid #333;
+  border-radius: 10px;
+  padding: 10px;
+  margin: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: white;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  font-family: Arial, sans-serif;
+  transition: transform 0.3s ease;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+}
+
+.card.red {
+  color: #e74c3c;
+}
+
+.card.black {
+  color: #2c3e50;
+}
+
+.card.hidden {
+  background: linear-gradient(45deg, #3498db, #2980b9);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2em;
+  border: 3px dashed #fff;
+}
+
+.card.empty {
+  background: #ecf0f1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7f8c8d;
+  border: 2px dashed #bdc3c7;
+}
+
+.card-top, .card-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-size: 1.2em;
+  font-weight: bold;
+}
+
+.card-bottom {
+  align-items: flex-end;
+  transform: rotate(180deg);
+}
+
+.card-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-grow: 1;
+}
+
+.suit-large {
+  font-size: 3em;
+}
+
+.rank {
+  font-size: 1.4em;
+  font-weight: bold;
+}

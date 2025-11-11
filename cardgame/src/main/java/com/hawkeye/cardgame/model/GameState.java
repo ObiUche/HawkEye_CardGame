@@ -1,68 +1,40 @@
 package com.hawkeye.cardgame.model;
 
-import java.util.List;
-
 public class GameState {
-	private String gameId;
-	private List<Card> deck;
-	private Card currentCard;
-	private Card nextCard;
-	private int score;
-	private boolean gameOver;
-	private String message;
-	
-	public String getGameId() {
-		return gameId;
-	}
-	
-	public void setGameId(String gameId) {
-		this.gameId = gameId;
-	}
-	
-	public List<Card> getDeck(){return deck;}
-	
-	public void setDeck(List<Card> deck){
-		this.deck = deck;
-	}
-	
-	public Card getCurrentCard() {
-		return currentCard;
-	}
-	public void setCurrentCard(Card currentCard) {
-		this.currentCard = currentCard;
-		
-	}
+    private String gameId;
+    private Card currentCard;
+    private Card nextCard;
+    private int score;
+    private boolean gameOver;
+    private String message;
 
-	public Card getNextCard() {
-		return nextCard;
-	}
+    public GameState() {}
 
-	public void setNextCard(Card nextCard) {
-		this.nextCard = nextCard;
-	}
+    public GameState(String gameId, Card currentCard, Card nextCard, int score, boolean gameOver, String message) {
+        this.gameId = gameId;
+        this.currentCard = currentCard;
+        this.nextCard = nextCard;
+        this.score = score;
+        this.gameOver = gameOver;
+        this.message = message;
+    }
 
-	public int getScore() {
-		return score;
-	}
+    // Getters and Setters
+    public String getGameId() { return gameId; }
+    public void setGameId(String gameId) { this.gameId = gameId; }
 
-	public void setScore(int score) {
-		this.score = score;
-	}
+    public Card getCurrentCard() { return currentCard; }
+    public void setCurrentCard(Card currentCard) { this.currentCard = currentCard; }
 
-	public boolean isGameOver() {
-		return gameOver;
-	}
+    public Card getNextCard() { return nextCard; }
+    public void setNextCard(Card nextCard) { this.nextCard = nextCard; }
 
-	public void setGameOver(boolean gameOver) {
-		this.gameOver = gameOver;
-	}
+    public int getScore() { return score; }
+    public void setScore(int score) { this.score = score; }
 
-	public String getMessage() {
-		return message;
-	}
+    public boolean isGameOver() { return gameOver; }
+    public void setGameOver(boolean gameOver) { this.gameOver = gameOver; }
 
-	public void setMessage(String message) {
-		this.message = message;
-	}
-
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
 }
