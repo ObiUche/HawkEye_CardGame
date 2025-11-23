@@ -3,8 +3,9 @@ import { webSocketService } from '../services/websocketService';
 import { gameAPI } from '../services/gameAPI';
 import Card from './Card';
 import Webcam from 'react-webcam';
-import * as tf from '@tensorflow/tfjs';
-import * as handpose from '@tensorflow-models/handpose';
+import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
+import { Camera } from '@mediapipe/camera_utils';
+import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
 import './LiveGestureGame.css';
 
 const LiveGestureGame = () => {
@@ -13,39 +14,65 @@ const LiveGestureGame = () => {
   const [isDetecting, setIsDetecting] = useState(false);
   const [message, setMessage] = useState('Start a new game to begin!');
   const [sessionId] = useState(`user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-  const [model, setModel] = useState(null);
   const [cameraAvailable, setCameraAvailable] = useState(true);
   const [debugInfo, setDebugInfo] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   
-  // Enhanced gesture detection states
   const [lastGestureTime, setLastGestureTime] = useState(0);
+  const [lastResetTime, setLastResetTime] = useState(0);
+  const [cardUpdateDelay, setCardUpdateDelay] = useState(false);
+  const [globalCooldownUntil, setGlobalCooldownUntil] = useState(0); // NEW: Global cooldown state
   
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
   const gameIdRef = useRef(null);
   const detectionRef = useRef(false);
   const gestureHistoryRef = useRef([]);
+  const handsRef = useRef(null);
+  const cameraRef = useRef(null);
 
-  // Load HandPose model
+  // Initialize MediaPipe Hands
   useEffect(() => {
-    const loadModel = async () => {
+    const initializeMediaPipe = async () => {
       try {
-        console.log('🚀 Loading TensorFlow.js...');
-        await tf.ready();
-        console.log('✅ TensorFlow.js loaded');
+        console.log('🚀 Initializing MediaPipe Hands...');
         
-        console.log('🚀 Loading HandPose model...');
-        const handposeModel = await handpose.load();
-        setModel(handposeModel);
-        console.log('✅ HandPose model loaded');
+        const hands = new Hands({
+          locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+          }
+        });
+
+        hands.setOptions({
+          selfieMode: false,
+          maxNumHands: 2,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        hands.onResults((results) => {
+          if (detectionRef.current) {
+            handleHandResults(results);
+          }
+        });
+
+        handsRef.current = hands;
+        console.log('✅ MediaPipe Hands initialized');
         setMessage('Model loaded! Start a new game and enable detection.');
       } catch (error) {
-        console.error('❌ Error loading models:', error);
-        setMessage('Error loading AI model. Please refresh the page.');
+        console.error('❌ Error initializing MediaPipe:', error);
+        setMessage('Error loading hand detection model. Please refresh the page.');
       }
     };
-    loadModel();
+
+    initializeMediaPipe();
+
+    return () => {
+      if (cameraRef.current) {
+        cameraRef.current.stop();
+      }
+    };
   }, []);
 
   // Initialize WebSocket connection
@@ -56,7 +83,6 @@ const LiveGestureGame = () => {
       if (gestureData.gesture) {
         setGesture(gestureData.gesture);
         
-        // Handle reset gesture
         if (gestureData.gesture === 'reset') {
           console.log('🔄 Reset gesture received, updating game state');
           if (gestureData.currentCard && gestureData.nextCard) {
@@ -71,17 +97,21 @@ const LiveGestureGame = () => {
             gameIdRef.current = gestureData.gameId;
           }
         }
-        // Handle game gestures (higher/lower)
         else if (gestureData.currentCard && gestureData.nextCard) {
           console.log('🃏 Game state update received');
-          setGameState({
-            gameId: gestureData.gameId,
-            currentCard: gestureData.currentCard,
-            nextCard: gestureData.nextCard,
-            score: gestureData.score || 0,
-            gameOver: gestureData.gameOver || false,
-            message: gestureData.message
-          });
+          
+          setCardUpdateDelay(true);
+          setTimeout(() => {
+            setGameState({
+              gameId: gestureData.gameId,
+              currentCard: gestureData.currentCard,
+              nextCard: gestureData.nextCard,
+              score: gestureData.score || 0,
+              gameOver: gestureData.gameOver || false,
+              message: gestureData.message
+            });
+            setCardUpdateDelay(false);
+          }, 500);
         }
       }
       
@@ -92,7 +122,6 @@ const LiveGestureGame = () => {
 
     webSocketService.connect(sessionId, handleGestureUpdate);
     
-    // Check WebSocket connection status
     const checkConnection = setInterval(() => {
       setWsConnected(webSocketService.isWebSocketConnected());
     }, 1000);
@@ -109,7 +138,7 @@ const LiveGestureGame = () => {
       const newGameState = await gameAPI.startGame();
       setGameState(newGameState);
       gameIdRef.current = newGameState.gameId;
-      setMessage('Game started! Click "Start Detection" and show your hand.');
+      setMessage('Game started! Click "Start Detection" and show your hand(s).');
       
     } catch (error) {
       setMessage('Error starting game: ' + error.message);
@@ -127,19 +156,23 @@ const LiveGestureGame = () => {
       const updatedGameState = await gameAPI.makeGuess(gameIdRef.current, guess);
       
       console.log('🃏 API Response:', updatedGameState);
-      setGameState(updatedGameState);
       
-      if (updatedGameState.message) {
-        setMessage(updatedGameState.message);
-      } else {
-        setMessage(`Guess processed! Score: ${updatedGameState.score}`);
-      }
-      
-      // If game over, stop detection
-      if (updatedGameState.gameOver) {
-        console.log('🎮 Game over!');
-        stopGestureDetection();
-      }
+      setCardUpdateDelay(true);
+      setTimeout(() => {
+        setGameState(updatedGameState);
+        setCardUpdateDelay(false);
+        
+        if (updatedGameState.message) {
+          setMessage(updatedGameState.message);
+        } else {
+          setMessage(`Guess processed! Score: ${updatedGameState.score}`);
+        }
+        
+        if (updatedGameState.gameOver) {
+          console.log('🎮 Game over!');
+          stopGestureDetection();
+        }
+      }, 500);
       
     } catch (error) {
       console.error('❌ Error in makeGuess:', error);
@@ -152,23 +185,88 @@ const LiveGestureGame = () => {
     setGesture('none');
     gestureHistoryRef.current = [];
     gameIdRef.current = null;
+    setGlobalCooldownUntil(0); // Reset cooldown on restart
     setMessage('Start a new game to begin!');
     startNewGame();
   };
 
-  // Fixed gesture stabilization
+  // Count extended fingers for reset detection
+  const countExtendedFingers = (landmarks) => {
+    const fingerTips = [4, 8, 12, 16, 20];
+    const fingerJoints = [2, 5, 9, 13, 17];
+    
+    let extendedCount = 0;
+    
+    fingerTips.forEach((tipIndex, i) => {
+      const tip = landmarks[tipIndex];
+      const joint = landmarks[fingerJoints[i]];
+      
+      if (i === 0) {
+        const thumbExtended = tip.x > joint.x;
+        if (thumbExtended) extendedCount++;
+      } else {
+        const fingerExtended = tip.y < joint.y;
+        if (fingerExtended) extendedCount++;
+      }
+    });
+    
+    return extendedCount;
+  };
+
+  const classifyGesture = (results) => {
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+      return 'none';
+    }
+    
+    const hands = results.multiHandLandmarks;
+    const handedness = results.multiHandedness;
+    
+    if (hands.length === 1) {
+      const handLabel = handedness[0].label;
+      console.log(`Detected single hand: ${handLabel}`);
+      
+      if (handLabel === 'Left') {
+        return 'higher';
+      } else if (handLabel === 'Right') {
+        return 'lower';
+      }
+    }
+    
+    if (hands.length === 2) {
+      const fingers1 = countExtendedFingers(hands[0]);
+      const fingers2 = countExtendedFingers(hands[1]);
+      
+      if (fingers1 >= 4 && fingers2 >= 4) {
+        return 'reset';
+      }
+      
+      const hand1Label = handedness[1].label;
+      const hand2Label = handedness[0].label;
+      
+      console.log(`Detected hands: ${hand1Label} and ${hand2Label}`);
+      
+      if (hand1Label !== hand2Label) {
+        return 'reset';
+      }
+      else if (hand1Label === 'Left') {
+        return 'higher';
+      } else {
+        return 'lower';
+      }
+    }
+    
+    return 'none';
+  };
+
   const getStableGesture = (currentGesture) => {
-    // Add current gesture to history (keep last 5 frames)
     const newHistory = [...gestureHistoryRef.current, currentGesture].slice(-5);
     gestureHistoryRef.current = newHistory;
     
-    // Require at least 3 out of 5 frames to have the same gesture
     const gestureCounts = {};
     newHistory.forEach(g => {
       gestureCounts[g] = (gestureCounts[g] || 0) + 1;
     });
     
-    // Find the most frequent gesture that appears at least 3 times
     for (const [gest, count] of Object.entries(gestureCounts)) {
       if (count >= 3 && gest !== 'none') {
         return gest;
@@ -178,9 +276,120 @@ const LiveGestureGame = () => {
     return 'none';
   };
 
+ const handleHandResults = (results) => {
+  const now = Date.now();
+  
+  console.log('🔍 ENTER handleHandResults - cooldownUntil:', globalCooldownUntil, 'now:', now);
+  
+  // Check global cooldown first
+  if (now < globalCooldownUntil) {
+    const remainingCooldown = Math.ceil((globalCooldownUntil - now) / 1000);
+    console.log('⏸️  IN COOLDOWN - returning early');
+    setDebugInfo(`⏳ Global cooldown: ${remainingCooldown}s remaining`);
+    return;
+  }
+  
+  console.log('✅ NOT in cooldown, proceeding...');
+  
+  const canvas = canvasRef.current;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  let hasHands = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
+  console.log('✋ Has hands detected:', hasHands);
+  
+  if (results.multiHandLandmarks) {
+    results.multiHandLandmarks.forEach((landmarks, index) => {
+      const handedness = results.multiHandedness[index];
+      const color = handedness.label === 'Left' ? '#4ecdc4' : '#ff6b6b';
+      
+      drawLandmarks(ctx, landmarks, {
+        color: color,
+        fillColor: color,
+        lineWidth: 2,
+        radius: 3
+      });
+      
+      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+        color: color,
+        lineWidth: 4
+      });
+    });
+  }
+  
+  if (hasHands) {
+    const rawGesture = classifyGesture(results);
+    console.log('🎭 Raw gesture:', rawGesture);
+    
+    const stableGesture = getStableGesture(rawGesture);
+    console.log('🎯 Stable gesture:', stableGesture);
+    
+    if (stableGesture !== gesture) {
+      setGesture(stableGesture);
+    }
+    
+    console.log('🆔 gameIdRef.current:', gameIdRef.current);
+    console.log('❓ Conditions - stableGesture !== "none":', stableGesture !== 'none');
+    console.log('❓ Conditions - gameIdRef.current exists:', !!gameIdRef.current);
+    
+    // CRITICAL: Check if we meet the conditions to send a gesture
+    if (stableGesture !== 'none' && gameIdRef.current) {
+      console.log('🚨 ALL CONDITIONS MET - READY TO SEND GESTURE AND SET COOLDOWN');
+      
+      const timeSinceLastGesture = now - lastGestureTime;
+      const timeSinceLastReset = now - lastResetTime;
+      const gestureCooldown = stableGesture === 'reset' ? 2000 : 800;
+      const timeSinceLastRelevant = stableGesture === 'reset' ? timeSinceLastReset : timeSinceLastGesture;
+      
+      console.log('⏰ Timing - timeSinceLastRelevant:', timeSinceLastRelevant, 'gestureCooldown:', gestureCooldown);
+      console.log('⏰ Timing - condition met:', timeSinceLastRelevant === 0 || timeSinceLastRelevant > gestureCooldown);
+      
+      if (timeSinceLastRelevant === 0 || timeSinceLastRelevant > gestureCooldown) {
+        console.log('🚀 SENDING GESTURE:', stableGesture);
+        webSocketService.sendGesture(stableGesture, gameIdRef.current);
+        
+        console.log('⏰ SETTING COOLDOWN UNTIL:', now + 5000);
+        setGlobalCooldownUntil(now + 5000);
+        
+        if (stableGesture === 'reset') {
+          setLastResetTime(now);
+        } else {
+          setLastGestureTime(now);
+        }
+        
+        setDebugInfo(`✅ ${stableGesture.toUpperCase()} sent! (5s cooldown)`);
+        console.log('✅ Cooldown should be set now');
+        
+        setTimeout(() => {
+          gestureHistoryRef.current = [];
+        }, 200);
+      } else {
+        console.log('⏳ Waiting for gesture-specific cooldown');
+        const remaining = Math.ceil((gestureCooldown - timeSinceLastRelevant) / 1000);
+        setDebugInfo(`⏳ ${stableGesture.toUpperCase()} ready in ${remaining}s`);
+      }
+    } else {
+      if (stableGesture === 'none') {
+        console.log('❌ Stable gesture is "none" - not sending');
+      } else if (!gameIdRef.current) {
+        console.log('❌ No game ID - not sending');
+      }
+      
+      const handInfo = results.multiHandedness ? results.multiHandedness.map(hand => hand.label).join(' & ') : 'none';
+      setDebugInfo(`Hands: ${handInfo} | Gesture: ${stableGesture}`);
+    }
+  } else {
+    gestureHistoryRef.current = [];
+    setGesture('none');
+    setDebugInfo('No hands detected - show your hand(s) to the camera');
+  }
+  
+  console.log('🔚 EXIT handleHandResults');
+};
+
   const startGestureDetection = () => {
-    if (!model) {
-      setMessage('AI model still loading. Please wait...');
+    if (!handsRef.current) {
+      setMessage('Hand detection model still loading. Please wait...');
       return;
     }
     if (!cameraAvailable) {
@@ -192,13 +401,31 @@ const LiveGestureGame = () => {
       return;
     }
     
+    const video = webcamRef.current.video;
+    if (!video) {
+      setMessage('Camera not ready. Please wait...');
+      return;
+    }
+    
     detectionRef.current = true;
     setIsDetecting(true);
-    setLastGestureTime(0); // Reset cooldown
-    gestureHistoryRef.current = []; // Clear gesture history
-    setMessage('Detection started! Show your hand to the camera.');
+    setLastGestureTime(0);
+    setLastResetTime(0);
+    setGlobalCooldownUntil(0); // Reset cooldown when starting detection
+    gestureHistoryRef.current = [];
+    setMessage('Detection started! Show your hand(s) to the camera.');
     webSocketService.startRecognition(0);
-    detectGestures();
+    
+    cameraRef.current = new Camera(video, {
+      onFrame: async () => {
+        if (detectionRef.current && handsRef.current) {
+          await handsRef.current.send({ image: video });
+        }
+      },
+      width: 640,
+      height: 480
+    });
+    cameraRef.current.start();
   };
 
   const stopGestureDetection = () => {
@@ -206,162 +433,14 @@ const LiveGestureGame = () => {
     setIsDetecting(false);
     setGesture('none');
     gestureHistoryRef.current = [];
+    setGlobalCooldownUntil(0); // Reset cooldown when stopping
     setMessage('Gesture detection stopped.');
     setDebugInfo('');
     webSocketService.stopRecognition();
-  };
-
-  const detectGestures = async () => {
-    if (!detectionRef.current || !model || !webcamRef.current) return;
-
-    try {
-      const video = webcamRef.current.video;
-      if (!video || video.readyState !== 4) {
-        // Use setTimeout instead of requestAnimationFrame for frame rate control
-        setTimeout(detectGestures, 100); // 10fps instead of 60fps
-        return;
-      }
-
-      // Get hand predictions
-      const predictions = await model.estimateHands(video, false);
-      
-      // Clear canvas
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      if (predictions.length > 0) {
-        const hand = predictions[0];
-        const rawGesture = classifyGesture(hand);
-        
-        // Apply gesture stabilization
-        const stableGesture = getStableGesture(rawGesture);
-        
-        // Only update displayed gesture if it's stable
-        if (stableGesture !== gesture) {
-          setGesture(stableGesture);
-        }
-        
-        drawHand(hand.landmarks, ctx);
-        
-        // Enhanced cooldown system
-        const now = Date.now();
-        const timeSinceLastGesture = now - lastGestureTime;
-        
-        // Only process gestures that are stable and not 'none'
-        if (stableGesture !== 'none' && gameIdRef.current && (lastGestureTime === 0 || timeSinceLastGesture > 800)) {
-          console.log(`🎯 Sending stable gesture: ${stableGesture} for game: ${gameIdRef.current}`);
-          webSocketService.sendGesture(stableGesture, gameIdRef.current);
-          setLastGestureTime(now);
-          
-          setDebugInfo(`✅ ${stableGesture.toUpperCase()} gesture sent! (Stable)`);
-        } else if (stableGesture !== 'none' && stableGesture !== gesture) {
-          // Show when gesture is stabilizing
-          setDebugInfo(`🔄 Stabilizing: ${rawGesture} → ${stableGesture}`);
-        } else if (stableGesture !== 'none') {
-          // Show when gesture is detected but waiting for cooldown
-          const remainingCooldown = Math.ceil((800 - timeSinceLastGesture) / 1000);
-          setDebugInfo(`⏳ ${stableGesture.toUpperCase()} ready in ${remainingCooldown}s`);
-        } else {
-          setDebugInfo(`Hand detected! Raw: ${rawGesture} | Stable: ${stableGesture}`);
-        }
-      } else {
-        // No hand detected - reset gesture history
-        gestureHistoryRef.current = [];
-        setGesture('none');
-        setDebugInfo('No hand detected - show your hand to the camera');
-      }
-
-      // Continue detection with controlled frame rate (10fps)
-      if (detectionRef.current) {
-        setTimeout(detectGestures, 100); // 100ms = 10fps
-      }
-    } catch (error) {
-      console.error('Error in gesture detection:', error);
-      setDebugInfo('Detection error: ' + error.message);
-      
-      // Continue with error recovery
-      if (detectionRef.current) {
-        setTimeout(detectGestures, 100);
-      }
+    
+    if (cameraRef.current) {
+      cameraRef.current.stop();
     }
-  };
-
-  const countExtendedFingers = (hand) => {
-    const landmarks = hand.landmarks;
-    const fingerTips = [4, 8, 12, 16, 20];
-    const fingerJoints = [2, 5, 9, 13, 17];
-    
-    let extendedCount = 0;
-    
-    fingerTips.forEach((tipIndex, i) => {
-      const tip = landmarks[tipIndex];
-      const joint = landmarks[fingerJoints[i]];
-      
-      if (i === 0) {
-        // Thumb extension check
-        const thumbExtended = tip[0] > joint[0];
-        if (thumbExtended) extendedCount++;
-      } else {
-        // For other fingers
-        const fingerExtended = tip[1] < joint[1];
-        if (fingerExtended) extendedCount++;
-      }
-    });
-    
-    return extendedCount;
-  };
-
-  const classifyGesture = (hand) => {
-    const extendedFingers = countExtendedFingers(hand);
-    
-    // Reduced logging to prevent console spam
-    if (Math.random() < 0.1) { // Only log 10% of the time
-      console.log(`Extended fingers: ${extendedFingers}`);
-    }
-    
-    if (extendedFingers >= 4) {
-      return 'higher';
-    } else if (extendedFingers <= 1) {
-      return 'lower';
-    } else if (extendedFingers === 2) {
-      return 'reset';
-    } else {
-      return 'none';
-    }
-  };
-
-  const drawHand = (landmarks, ctx) => {
-    if (!landmarks) return;
-    
-    ctx.fillStyle = '#00ff00';
-    ctx.strokeStyle = '#00ff00';
-    ctx.lineWidth = 3;
-
-    landmarks.forEach((point) => {
-      ctx.beginPath();
-      ctx.arc(point[0], point[1], 4, 0, 2 * Math.PI);
-      ctx.fill();
-    });
-
-    const connections = [
-      [0, 1, 2, 3, 4],
-      [0, 5, 6, 7, 8],
-      [0, 9, 10, 11, 12],
-      [0, 13, 14, 15, 16],
-      [0, 17, 18, 19, 20]
-    ];
-
-    connections.forEach(finger => {
-      for (let i = 0; i < finger.length - 1; i++) {
-        const start = landmarks[finger[i]];
-        const end = landmarks[finger[i + 1]];
-        ctx.beginPath();
-        ctx.moveTo(start[0], start[1]);
-        ctx.lineTo(end[0], end[1]);
-        ctx.stroke();
-      }
-    });
   };
 
   const handleCameraError = () => {
@@ -382,22 +461,19 @@ const LiveGestureGame = () => {
       </div>
 
       <div className="main-container">
-        {/* Left Side: Game Cards and Controls */}
         <div className="game-content">
-          {/* Connection Status */}
           <div className="connection-status">
             <div className={`status-indicator ${wsConnected ? 'connected' : 'disconnected'}`}>
               WebSocket: {wsConnected ? '✅ Connected' : '❌ Disconnected'}
             </div>
-            <div className={`status-indicator ${model ? 'connected' : 'disconnected'}`}>
-              AI Model: {model ? '✅ Loaded' : '❌ Loading...'}
+            <div className={`status-indicator ${handsRef.current ? 'connected' : 'disconnected'}`}>
+              Hand Model: {handsRef.current ? '✅ Loaded' : '❌ Loading...'}
             </div>
             <div className="status-indicator connected">
-              Detection Rate: 10fps (Stable)
+              Detection: MediaPipe (5s Cooldown)
             </div>
           </div>
 
-          {/* Game Stats */}
           <div className="game-stats">
             <div className="stat">
               <span className="stat-label">Score:</span>
@@ -417,7 +493,6 @@ const LiveGestureGame = () => {
             </div>
           </div>
 
-          {/* Cards Display */}
           <div className="cards-container">
             <div className="card-section">
               <h3>Current Card</h3>
@@ -451,13 +526,12 @@ const LiveGestureGame = () => {
             </div>
           </div>
 
-          {/* Gesture Status */}
           <div className="gesture-status">
             <div className={`gesture-indicator ${gesture}`}>
               <span className="gesture-label">
-                {gesture === 'higher' ? '👆 HIGHER' : 
-                 gesture === 'lower' ? '👇 LOWER' : 
-                 gesture === 'reset' ? '✌️ RESET' :
+                {gesture === 'higher' ? '👉 HIGHER' : 
+                 gesture === 'lower' ? '👈 LOWER' : 
+                 gesture === 'reset' ? '👐 RESET' :
                  '🤔 NO GESTURE'}
               </span>
               {gestureHistoryRef.current.length > 0 && (
@@ -468,19 +542,17 @@ const LiveGestureGame = () => {
             </div>
           </div>
 
-          {/* Game Message */}
           <div className="game-message">
             {message}
+            {cardUpdateDelay && <span className="update-delay"> (Updating...)</span>}
           </div>
 
-          {/* Debug Info */}
           {debugInfo && (
             <div className="debug-info">
               <small>{debugInfo}</small>
             </div>
           )}
 
-          {/* Controls */}
           <div className="game-controls">
             {!gameState ? (
               <button className="btn btn-primary" onClick={startNewGame}>
@@ -495,20 +567,21 @@ const LiveGestureGame = () => {
                 <button 
                   className={`btn ${isDetecting ? 'btn-warning' : 'btn-success'}`}
                   onClick={isDetecting ? stopGestureDetection : startGestureDetection}
-                  disabled={!model || !cameraAvailable || !wsConnected}
+                  disabled={!handsRef.current || !cameraAvailable || !wsConnected || cardUpdateDelay}
                 >
-                  {!model ? '🤖 Loading AI...' : 
+                  {!handsRef.current ? '🤖 Loading Model...' : 
                    !cameraAvailable ? '📷 No Camera' :
                    !wsConnected ? '🔌 Connecting...' :
+                   cardUpdateDelay ? '⏳ Updating...' :
                    isDetecting ? '🛑 Stop Detection' : '🎯 Start Detection'}
                 </button>
                 
                 <div className="manual-controls">
-                  <button className="btn btn-higher" onClick={() => makeGuess('higher')}>
-                    👆 Guess Higher
+                  <button className="btn btn-higher" onClick={() => makeGuess('higher')} disabled={cardUpdateDelay}>
+                    👉 Guess Higher
                   </button>
-                  <button className="btn btn-lower" onClick={() => makeGuess('lower')}>
-                    👇 Guess Lower
+                  <button className="btn btn-lower" onClick={() => makeGuess('lower')} disabled={cardUpdateDelay}>
+                    👈 Guess Lower
                   </button>
                 </div>
               </div>
@@ -516,7 +589,6 @@ const LiveGestureGame = () => {
           </div>
         </div>
 
-        {/* Right Side: Camera Feed */}
         <div className="camera-content">
           <div className="camera-section">
             <h3>🎥 Hand Camera</h3>
@@ -550,12 +622,12 @@ const LiveGestureGame = () => {
                   width={640}
                   height={480}
                   style={{
-                    transform: 'scaleX(-1)'
+                    transform: 'scaleX(-1)',
                   }}
                 />
                 <div className="camera-overlay">
                   <div className={`detection-status ${isDetecting ? 'active' : 'inactive'}`}>
-                    {isDetecting ? '🔴 Live (10fps)' : '⚪ Ready'}
+                    {isDetecting ? '🔴 Live (5s Cooldown)' : '⚪ Ready'}
                   </div>
                 </div>
               </div>
@@ -567,24 +639,23 @@ const LiveGestureGame = () => {
               </div>
             )}
 
-            {/* Gesture Instructions */}
             <div className="gesture-instructions compact">
-              <h4>Gesture Controls:</h4>
+              <h4>Gesture Controls (5s Cooldown):</h4>
               <div className="instruction-item">
-                <span className="gesture-demo">👋</span>
-                <span><strong>OPEN PALM</strong> for "HIGHER"</span>
+                <span className="gesture-demo" style={{color: '#4ecdc4'}}>👉</span>
+                <span><strong>RIGHT HAND</strong> for "HIGHER"</span>
               </div>
               <div className="instruction-item">
-                <span className="gesture-demo">✊</span>
-                <span><strong>CLOSED FIST</strong> for "LOWER"</span>
+                <span className="gesture-demo" style={{color: '#ff6b6b'}}>👈</span>
+                <span><strong>LEFT HAND</strong> for "LOWER"</span>
               </div>
               <div className="instruction-item">
-                <span className="gesture-demo">✌️</span>
-                <span><strong>TWO FINGERS</strong> for "RESET"</span>
+                <span className="gesture-demo">👐</span>
+                <span><strong>BOTH HANDS OPEN</strong> for "RESET"</span>
               </div>
               <div className="instruction-item">
                 <span className="gesture-demo">⏱️</span>
-                <span>0.8s cooldown + stabilization</span>
+                <span><strong>5-second cooldown</strong> after any gesture</span>
               </div>
             </div>
           </div>

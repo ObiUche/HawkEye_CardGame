@@ -37,19 +37,19 @@ public class GameController {
     		@PathVariable("gameId") String gameId, 
     		@RequestBody Map<String, String> requestMap) {
         try {
-            System.out.println("🎯 DEBUG: Request map received: " + requestMap);
+
             String guess = requestMap.get("guess");
-            System.out.println("🎯 DEBUG: Extracted guess: " + guess);
+
             
             if (guess == null) {
                 throw new IllegalArgumentException("Guess parameter is required");
             }
             
             GameState gameState = gameService.makeGuess(gameId, guess);
-            System.out.println("✅ DEBUG: Guess processed successfully");
+            System.out.println(" DEBUG: Guess processed successfully");
             return ResponseEntity.ok(gameState);
         } catch (Exception e) {
-            System.err.println("❌ Error making guess: " + e.getMessage());
+            System.err.println("Error making guess: " + e.getMessage());
             e.printStackTrace();
             return ResponseEntity.internalServerError().build();
         }

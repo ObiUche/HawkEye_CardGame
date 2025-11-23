@@ -9,7 +9,7 @@ public class GestureMessage {
     private LocalDateTime timestamp;
     private String gameId;
     
-    // 🃏 ADD THESE FIELDS
+    //  ADD THESE FIELDS
     private Card currentCard;
     private Card nextCard;
     private Integer score;
@@ -43,7 +43,7 @@ public class GestureMessage {
     public String getGameId() { return gameId; }
     public void setGameId(String gameId) { this.gameId = gameId; }
 
-    // 🃏 ADD GETTERS AND SETTERS FOR NEW FIELDS
+    //  ADD GETTERS AND SETTERS FOR NEW FIELDS
     public Card getCurrentCard() { return currentCard; }
     public void setCurrentCard(Card currentCard) { this.currentCard = currentCard; }
 

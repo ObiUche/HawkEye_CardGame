@@ -1,0 +1,5 @@
+com.hawkeye.cardgame
+com.hawkeye.cardgame.config
+com.hawkeye.cardgame.controller
+com.hawkeye.cardgame.model
+com.hawkeye.cardgame.service

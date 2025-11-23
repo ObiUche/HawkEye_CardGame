@@ -1,0 +1,1 @@
+packageSearchIndex = [{"l":"All Packages","u":"allpackages-index.html"},{"l":"com.hawkeye.cardgame.config"},{"l":"com.hawkeye.cardgame.controller"},{"l":"com.hawkeye.cardgame.model"},{"l":"com.hawkeye.cardgame.service"}];updateSearchResults();

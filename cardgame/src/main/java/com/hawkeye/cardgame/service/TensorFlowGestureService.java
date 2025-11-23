@@ -22,7 +22,7 @@ public class TensorFlowGestureService {
 
     public void registerSession(String sessionId) {
         activeSessions.add(sessionId);
-        System.out.println("✅ Session registered: " + sessionId);
+        System.out.println("Session registered: " + sessionId);
         
         // Send confirmation to the client
         GestureMessage response = new GestureMessage();
@@ -35,22 +35,22 @@ public class TensorFlowGestureService {
 
     public void unregisterSession(String sessionId) {
         activeSessions.remove(sessionId);
-        System.out.println("❌ Session unregistered: " + sessionId);
+        System.out.println(" Session unregistered: " + sessionId);
     }
 
     public void processGestureFromFrontend(String sessionId, String gesture, String gameId) {
         if (!activeSessions.contains(sessionId)) {
-            System.out.println("⚠️  Unknown session: " + sessionId);
+            System.out.println("⚠ Unknown session: " + sessionId);
             return;
         }
 
-        System.out.println("🎯 Processing gesture: " + gesture + " for session: " + sessionId);
+        System.out.println(" Processing gesture: " + gesture + " for session: " + sessionId);
 
         // 🎯 PROCESS GAME LOGIC IF WE HAVE A VALID GESTURE AND GAME
         if (gameId != null && !gameId.isEmpty()) {
             if ("higher".equals(gesture) || "lower".equals(gesture)) {
                 try {
-                    System.out.println("🃏 Processing game guess via gesture for game: " + gameId);
+                    System.out.println("Processing game guess via gesture for game: " + gameId);
                     
                     // PROCESS THE ACTUAL GAME LOGIC
                     GameState updatedGameState = gameService.makeGuess(gameId, gesture);
@@ -74,7 +74,7 @@ public class TensorFlowGestureService {
                     System.out.println("✅ Game processed via gesture. Score: " + updatedGameState.getScore());
                     
                 } catch (Exception e) {
-                    System.out.println("❌ Error processing gesture as game guess: " + e.getMessage());
+                    System.out.println(" Error processing gesture as game guess: " + e.getMessage());
                     
                     GestureMessage errorResponse = new GestureMessage();
                     errorResponse.setSessionId(sessionId);
@@ -86,7 +86,7 @@ public class TensorFlowGestureService {
             // 🆕 HANDLE RESET GESTURE
             else if ("reset".equals(gesture)) {
                 try {
-                    System.out.println("🔄 Processing reset gesture for game: " + gameId);
+                    System.out.println("Processing reset gesture for game: " + gameId);
                     
                     // Start a new game
                     GameState newGameState = gameService.startNewGame();
@@ -107,10 +107,10 @@ public class TensorFlowGestureService {
                     // Send to the specific session
                     messagingTemplate.convertAndSend("/topic/gesture/" + sessionId, response);
                     
-                    System.out.println("✅ Game reset via gesture. New game ID: " + newGameState.getGameId());
+                    System.out.println(" Game reset via gesture. New game ID: " + newGameState.getGameId());
                     
                 } catch (Exception e) {
-                    System.out.println("❌ Error resetting game via gesture: " + e.getMessage());
+                    System.out.println(" Error resetting game via gesture: " + e.getMessage());
                     
                     GestureMessage errorResponse = new GestureMessage();
                     errorResponse.setSessionId(sessionId);
@@ -139,7 +139,7 @@ public class TensorFlowGestureService {
             response.setMessage("Gesture recognition started with camera " + cameraIndex);
             
             messagingTemplate.convertAndSend("/topic/gesture/" + sessionId, response);
-            System.out.println("🚀 Gesture recognition started for session: " + sessionId);
+            System.out.println(" Gesture recognition started for session: " + sessionId);
         }
     }
 
@@ -151,7 +151,7 @@ public class TensorFlowGestureService {
             response.setMessage("Gesture recognition stopped");
             
             messagingTemplate.convertAndSend("/topic/gesture/" + sessionId, response);
-            System.out.println("🛑 Gesture recognition stopped for session: " + sessionId);
+            System.out.println(" Gesture recognition stopped for session: " + sessionId);
         }
     }
 }
